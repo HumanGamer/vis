@@ -18,7 +18,16 @@ import type {
 import { useConnection } from './useConnection';
 import { redeemPairingLink, type Connection } from '../utils/protocol/client';
 import { errorMessage } from '../utils/errors';
+import { hostPathToSlashes, isWindowsPath } from '../utils/path';
 import { createPtyClient } from '../utils/protocol/pty';
+import {
+  classifyShell,
+  findGitBash,
+  gitBashFromGitPath,
+  locateGitCommand,
+  wrapGitScript,
+  type GitHostShell,
+} from '../utils/git/host-shell';
 import { compareProjects } from '../utils/projects';
 import {
   applyTranscriptEvent,
@@ -129,11 +138,132 @@ export function useSessionState() {
   const snapshotReads = new Map<string, number>();
   const permissionLocations = new Map<string, LocationPublicRef>();
   const formLocations = new Map<string, LocationPublicRef>();
+  const gitHostShells = new Map<string, Promise<GitHostShell>>();
+  // Shell commands finish via `shell.exited` events; the exit can arrive before
+  // `shell.create` returns, so recent exits are remembered briefly.
+  const shellWaiters = new Map<string, () => void>();
+  const recentShellExits = new Set<string>();
   let syncing = false;
   let syncAgain = false;
   const touched = new Map<string, number>();
   const listeners = new Set<(event: OpenCodeEvent) => void>();
+  listeners.add((event) => {
+    if (event.type !== 'shell.exited') return;
+    const waiter = shellWaiters.get(event.data.id);
+    if (waiter) return waiter();
+    recentShellExits.add(event.data.id);
+    if (recentShellExits.size > 64)
+      recentShellExits.delete(recentShellExits.values().next().value as string);
+  });
   watch(() => selected.value?.id, syncAttention);
+
+  /** Run one command with the host's configured shell and collect its output. */
+  async function runHostShell(
+    scope: LocationPublicRef,
+    command: string,
+    title: string,
+    request?: { signal?: AbortSignal; timeout?: number },
+  ) {
+    const shell = api().shell;
+    const timeout = request?.timeout ?? 120000;
+    const signal = AbortSignal.any([
+      transport.signal(),
+      AbortSignal.timeout(timeout),
+      ...(request?.signal ? [request.signal] : []),
+    ]);
+    const started = await shell.create(
+      {
+        location: scope,
+        command,
+        timeout,
+        metadata: { source: 'vis-git', title },
+      },
+      { signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) },
+    );
+    const id = started.data.id;
+    try {
+      let info = started.data;
+      let checks = 0;
+      while (info.status === 'running') {
+        if (!recentShellExits.delete(id))
+          await new Promise<void>((resolve, reject) => {
+            signal.throwIfAborted();
+            const done = () => {
+              clearTimeout(timer);
+              shellWaiters.delete(id);
+              signal.removeEventListener('abort', cancel);
+              resolve();
+            };
+            const cancel = () => {
+              done();
+              reject(signal.reason);
+            };
+            // The exit event normally wakes this up; poll slowly in case it is missed.
+            const timer = setTimeout(done, checks++ < 2 ? 250 : 1000);
+            shellWaiters.set(id, done);
+            signal.addEventListener('abort', cancel, { once: true });
+          });
+        info = (await shell.get({ id, location: scope }, { signal })).data;
+      }
+      let text = '';
+      let cursor = 0;
+      for (;;) {
+        const page = (await shell.output({ id, location: scope, cursor, limit: 65536 }, { signal }))
+          .data;
+        if (page.truncated) throw new Error('Git command output was truncated.');
+        text += page.output;
+        if (page.cursor >= page.size) break;
+        if (page.cursor <= cursor) throw new Error('Git command output cursor did not advance.');
+        cursor = page.cursor;
+      }
+      return { info, text };
+    } finally {
+      await shell.remove({ id, location: scope }, { signal: AbortSignal.timeout(10000) });
+    }
+  }
+
+  /** Detect, once per Location, how Git scripts reach a POSIX shell on the host. */
+  function gitHostShell(scope: LocationPublicRef, signal?: AbortSignal) {
+    const key = `${epoch}\0${scope.directory}`;
+    let pending = gitHostShells.get(key);
+    if (!pending) {
+      pending = detectGitHostShell(scope, signal);
+      gitHostShells.set(key, pending);
+      // Retry detection next time instead of caching a failure.
+      pending.catch(() => gitHostShells.delete(key));
+    }
+    return pending;
+  }
+
+  async function detectGitHostShell(
+    scope: LocationPublicRef,
+    signal?: AbortSignal,
+  ): Promise<GitHostShell> {
+    const probe = await runHostShell(scope, 'echo vis', 'Git shell detection', {
+      signal,
+      timeout: 15000,
+    });
+    const kind = classifyShell(probe.info.shell);
+    if (kind === 'posix') return { kind };
+    let bash = findGitBash(
+      await api()
+        .config.shells(options())
+        .catch(() => []),
+    );
+    if (!bash) {
+      const located = await runHostShell(scope, locateGitCommand(kind), 'Git shell detection', {
+        signal,
+        timeout: 15000,
+      });
+      if (located.info.status === 'exited' && located.info.exit === 0)
+        bash = gitBashFromGitPath(located.text);
+    }
+    if (!bash)
+      throw new Error(
+        `Git views need Git for Windows (Git Bash) on the OpenCode host; the host shell is ${probe.info.shell}.`,
+      );
+    return { kind, bash, windows: true };
+  }
 
   function location() {
     const info = selected.value?.location;
@@ -939,11 +1069,17 @@ export function useSessionState() {
     );
   }
 
-  function listFiles(scope: LocationPublicRef, path: string, signal: AbortSignal) {
-    return api().file.list(
+  async function listFiles(scope: LocationPublicRef, path: string, signal: AbortSignal) {
+    const listing = await api().file.list(
       { location: { directory: scope.directory }, path },
       { signal: AbortSignal.any([signal, options().signal]) },
     );
+    // Windows hosts report `dir\file`; the tree and Git status use `dir/file`.
+    if (!isWindowsPath(scope.directory)) return listing;
+    return {
+      ...listing,
+      data: listing.data.map((entry) => ({ ...entry, path: hostPathToSlashes(entry.path, true) })),
+    };
   }
 
   function readFile(scope: LocationPublicRef, path: string, signal: AbortSignal) {
@@ -1075,63 +1211,15 @@ export function useSessionState() {
       title = 'Git inspection',
       request?: { signal?: AbortSignal; timeout?: number },
     ) {
-      const shell = api().shell;
       const scope = location();
-      const script = `/bin/sh -c '${command.replaceAll("'", "'\\''")}'`;
-      // Shell API passes the entire command as one exec argument.
-      if (new TextEncoder().encode(script).length > 60000)
-        throw new Error('Git command exceeds the shell argument limit. Select fewer files.');
-      const timeout = request?.timeout ?? 120000;
-      const signal = AbortSignal.any([
-        transport.signal(),
-        AbortSignal.timeout(timeout),
-        ...(request?.signal ? [request.signal] : []),
-      ]);
-      const started = await shell.create(
-        {
-          location: scope,
-          command: script,
-          timeout,
-          metadata: { source: 'vis-git', title },
-        },
-        { signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) },
-      );
-      const id = started.data.id;
-      try {
-        let info = started.data;
-        while (info.status === 'running') {
-          await new Promise<void>((resolve, reject) => {
-            signal.throwIfAborted();
-            const cancel = () => {
-              clearTimeout(timer);
-              reject(signal.reason);
-            };
-            const timer = setTimeout(() => {
-              signal.removeEventListener('abort', cancel);
-              resolve();
-            }, 200);
-            signal.addEventListener('abort', cancel, { once: true });
-          });
-          info = (await shell.get({ id, location: scope }, { signal })).data;
-        }
-        let output = '';
-        let cursor = 0;
-        for (;;) {
-          const page = (
-            await shell.output({ id, location: scope, cursor, limit: 65536 }, { signal })
-          ).data;
-          if (page.truncated) throw new Error('Git command output was truncated.');
-          output += page.output;
-          if (page.cursor >= page.size) break;
-          if (page.cursor <= cursor) throw new Error('Git command output cursor did not advance.');
-          cursor = page.cursor;
-        }
-        if (info.status !== 'exited' || info.exit !== 0)
-          throw new Error(`${title} failed (${info.status}, exit ${info.exit}):\n${output}`);
-        return output;
-      } finally {
-        await shell.remove({ id, location: scope }, { signal: AbortSignal.timeout(10000) });
-      }
+      const host = await gitHostShell(scope, request?.signal);
+      const output = await runHostShell(scope, wrapGitScript(host, command), title, request);
+      if (output.info.status !== 'exited' || output.info.exit !== 0)
+        throw new Error(
+          `${title} failed (${output.info.status}, exit ${output.info.exit}):\n${output.text}`,
+        );
+      // Windows consoles may translate newlines; Git payloads are base64 and markers.
+      return host.kind === 'posix' ? output.text : output.text.replaceAll('\r\n', '\n');
     },
     async generateCommitMessage(prompt: string, signal: AbortSignal, model: ModelRef) {
       const response = await api().generate.text(

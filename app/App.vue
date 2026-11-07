@@ -92,6 +92,7 @@
             @open-diff-all="fileTree.openDiff(undefined, $event.mode === 'staged')"
             @git-action="openGitAction"
             @reload="fileTree.reload"
+            @refresh-git="fileTree.refreshGit"
             @toggle-dir="fileTree.toggle"
             @select-file="fileTree.selectedPath.value = $event || undefined"
             @open-file="fileTree.openFile"

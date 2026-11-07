@@ -76,3 +76,17 @@ export function splitFileContentDirectoryAndPath(
   const path = absolute.slice(firstSlash + 1);
   return { directory, path: path || '.' };
 }
+
+/** Whether a host path is a Windows drive path such as `C:\repo` or `C:/repo`. */
+export function isWindowsPath(value: string) {
+  return /^[A-Za-z]:[\\/]/.test(value);
+}
+
+/**
+ * Use forward slashes for a path reported by a Windows host. The UI keys files
+ * by Git-style `a/b.c` paths; Windows hosts report `a\b.c`. POSIX paths are
+ * returned unchanged, since a backslash is a legal filename character there.
+ */
+export function hostPathToSlashes(value: string, windows: boolean) {
+  return windows ? value.replaceAll('\\', '/') : value;
+}

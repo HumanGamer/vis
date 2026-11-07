@@ -42,6 +42,7 @@
         @open-diff-all="(payload) => emit('open-diff-all', payload)"
         @open-file="(path) => emit('open-file', path)"
         @reload="emit('reload')"
+        @refresh-git="emit('refresh-git')"
         @git-action="(action) => emit('git-action', action)"
       />
     </div>
@@ -80,6 +81,7 @@ const emit = defineEmits<{
   (event: 'open-diff-all', payload: { mode: 'staged' | 'changes' | 'all' }): void;
   (event: 'open-file', path: string): void;
   (event: 'reload'): void;
+  (event: 'refresh-git'): void;
   (event: 'git-action', action: GitAction): void;
 }>();
 

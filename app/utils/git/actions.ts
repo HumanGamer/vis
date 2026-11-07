@@ -50,9 +50,18 @@ export function shellQuote(value: string) {
 const DIFF =
   'git -c core.quotePath=true diff --no-ext-diff --no-textconv --no-renames --no-relative --no-color --src-prefix=a/ --dst-prefix=b/ --submodule=short --ignore-submodules=none';
 const SETUP = `set -eu
+# Keep stderr (e.g. Git's CRLF warnings) out of the parsed output, which the
+# shell API merges with stdout; replay it only if the script fails.
+vis_stderr=$(mktemp)
+exec 9>&2 2>"$vis_stderr"
+trap 'vis_status=$?; if test "$vis_status" != 0; then cat "$vis_stderr" >&9; fi; rm -f "$vis_stderr"; exit "$vis_status"' EXIT
 export GIT_LITERAL_PATHSPECS=1
 export GIT_OPTIONAL_LOCKS=0
 cd "$(git rev-parse --show-toplevel)"
+vis_root() {
+  # Git for Windows: report C:\\path like OpenCode Locations do.
+  if command -v cygpath > /dev/null 2>&1; then cygpath -w "$(pwd -P)"; else pwd -P; fi
+}
 capture() {
   captured=$(
     exec 4>&1
@@ -125,6 +134,14 @@ function parseStatus(text: string): GitSnapshot['status'] {
   return result;
 }
 
+/** Path of a Location inside the repository, as a Git path prefix ('' at the root). */
+export function locationPrefix(directory: string, root: string) {
+  if (directory === root) return '';
+  const relative = directory.slice(root.length + 1);
+  // Windows Locations use backslashes; Git paths always use forward slashes.
+  return (/^[A-Za-z]:\\/.test(root) ? relative.replaceAll('\\', '/') : relative) + '/';
+}
+
 export function displayHunk(hunk: GitHunk) {
   const lines = hunk.patch.split('\n');
   if (lines.at(-1) === '') lines.pop();
@@ -181,7 +198,10 @@ export function createGitActions(
     const parts = output.split(SEPARATOR);
     if (parts.length !== count + 1 || parts.at(-1) !== 'VIS_GIT_DONE\n')
       throw new Error(`Git inspection failed: ${output.trim()}`);
-    return parts.slice(0, -1).map((part) => part.replaceAll(/\s/g, ''));
+    const encoded = parts.slice(0, -1).map((part) => part.replaceAll(/\s/g, ''));
+    if (encoded.some((part) => !/^[A-Za-z0-9+/]*={0,2}$/.test(part)))
+      throw new Error(`Git inspection returned unexpected output: ${output.trim()}`);
+    return encoded;
   }
 
   async function read(
@@ -192,17 +212,18 @@ export function createGitActions(
     return (await readEncoded(script, count, options)).map(decode);
   }
 
+  const SNAPSHOT_SECTIONS =
+    section('vis_root') +
+    section('git rev-parse --verify -q HEAD || test "$?" = 1') +
+    section('git -c core.quotePath=true status --porcelain=v1 --no-renames --untracked-files=all') +
+    section('git symbolic-ref -q HEAD || test "$?" = 1');
+  const STATISTICS_SECTIONS = diffSections('--cached') + diffSections('');
+
   async function snapshot(signal?: AbortSignal): Promise<GitSnapshot> {
-    const parts = await read(
-      section('pwd -P') +
-        section('git rev-parse --verify -q HEAD || test "$?" = 1') +
-        section(
-          'git -c core.quotePath=true status --porcelain=v1 --no-renames --untracked-files=all',
-        ) +
-        section('git symbolic-ref -q HEAD || test "$?" = 1'),
-      4,
-      { signal },
-    );
+    return parseSnapshot(await read(SNAPSHOT_SECTIONS, 4, { signal }));
+  }
+
+  function parseSnapshot(parts: string[]): GitSnapshot {
     const result: GitSnapshot = {
       root: parts[0].trimEnd(),
       head: parts[1].trim(),
@@ -234,8 +255,17 @@ export function createGitActions(
   }
 
   async function statistics() {
-    const parts = await read(diffSections('--cached') + diffSections(''), 2);
+    const parts = await read(STATISTICS_SECTIONS, 2);
     return { staged: parsePatches(parts[0]), unstaged: parsePatches(parts[1]) };
+  }
+
+  /** Snapshot and diff statistics in one host command (one shell start-up). */
+  async function overview(signal?: AbortSignal) {
+    const parts = await read(SNAPSHOT_SECTIONS + STATISTICS_SECTIONS, 6, { signal });
+    return {
+      snapshot: parseSnapshot(parts.slice(0, 4)),
+      statistics: { staged: parsePatches(parts[4]), unstaged: parsePatches(parts[5]) },
+    };
   }
 
   async function inspectFile(
@@ -345,7 +375,7 @@ done
     // An unborn branch has no commit history.
     if (!snapshot.head) return [];
     const [log] = await read(
-      section(`test "$(pwd -P)" = ${shellQuote(snapshot.root)}
+      section(`test "$(vis_root)" = ${shellQuote(snapshot.root)}
 git --no-pager log -10 --date-order --no-merges --no-show-signature --encoding=UTF-8 --format=format:%B%x00 ${shellQuote(snapshot.head)} --`),
       1,
       { signal, timeout: 5000 },
@@ -366,7 +396,7 @@ git --no-pager log -10 --date-order --no-merges --no-show-signature --encoding=U
   }
 
   function guard(snapshot: GitSnapshot) {
-    return `test "$(pwd -P)" = ${shellQuote(snapshot.root)}
+    return `test "$(vis_root)" = ${shellQuote(snapshot.root)}
 test "$(git rev-parse --verify -q HEAD || test "$?" = 1)" = ${shellQuote(snapshot.head)}
 test "$(git symbolic-ref -q HEAD || test "$?" = 1)" = ${shellQuote(snapshot.branchRef)}
 `;
@@ -445,7 +475,7 @@ test "$(git symbolic-ref -q HEAD || test "$?" = 1)" = ${shellQuote(snapshot.bran
     if (code !== 0) throw new Error('Git commit failed. Refresh before continuing.');
   }
 
-  return { snapshot, statistics, source, preview, recentMessages, stage, commit };
+  return { snapshot, statistics, overview, source, preview, recentMessages, stage, commit };
 }
 
 export type GitActions = ReturnType<typeof createGitActions>;

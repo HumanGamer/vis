@@ -440,6 +440,7 @@ const emit = defineEmits<{
   (event: 'open-diff-all', payload: { mode: 'staged' | 'changes' | 'all' }): void;
   (event: 'open-file', path: string): void;
   (event: 'reload'): void;
+  (event: 'refresh-git'): void;
   (event: 'git-action', action: GitAction): void;
 }>();
 
@@ -536,8 +537,10 @@ const diffStatsTitle = computed(() => {
 });
 
 function setViewMode(mode: TreeViewMode) {
+  if (viewMode.value === mode) return;
   viewMode.value = mode;
-  emit('reload');
+  // Show what is already loaded; only refresh Git status in the background.
+  if (mode !== 'all') emit('refresh-git');
 }
 
 function sortNodes(nodes: TreeNode[]) {

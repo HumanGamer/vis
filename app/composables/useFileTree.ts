@@ -10,7 +10,7 @@ import hexdump from '@kikuchan/hexdump';
 import { errorMessage } from '../utils/errors';
 import { fileContent, findTreeNode, treeFiles } from '../utils/files';
 import { createFileIndex } from '../utils/fileIndex';
-import type { GitActions, GitPatch } from '../utils/git/actions';
+import { locationPrefix, type GitActions, type GitPatch } from '../utils/git/actions';
 
 export function useFileTree(
   state: ReturnType<typeof useSessionState>,
@@ -101,20 +101,16 @@ export function useFileTree(
     const current = generation;
     const request = ++gitRevision;
     try {
-      const [result, snapshot, counts] = await Promise.all([
+      const [result, { snapshot, statistics: counts }] = await Promise.all([
         state.readVcs(location, controller.signal),
-        git.snapshot(),
-        git.statistics(),
+        git.overview(),
       ]);
       if (current !== generation || request !== gitRevision) return;
       gitError.value = '';
       branch.value = result.info.branch.current
         ? { branch: result.info.branch.current, ahead: 0, behind: 0 }
         : null;
-      const prefix =
-        location.directory === snapshot.root
-          ? ''
-          : location.directory.slice(snapshot.root.length + 1) + '/';
+      const prefix = locationPrefix(location.directory, snapshot.root);
       gitStatus.value = Object.fromEntries(
         Object.values(snapshot.status)
           .filter((file) => file.path.startsWith(prefix))
@@ -157,10 +153,7 @@ export function useFileTree(
       const snapshot = await git.snapshot();
       const changes = staged ? snapshot.staged : [...snapshot.changes, ...snapshot.untracked];
       if (current !== generation) return;
-      const prefix =
-        location.directory !== snapshot.root
-          ? location.directory.slice(snapshot.root.length + 1) + '/'
-          : '';
+      const prefix = locationPrefix(location.directory, snapshot.root);
       const files = path ? changes.filter((file) => file.file === prefix + path) : changes;
       if (!files.length) {
         state.error.value = 'No working-copy diff is available for this selection.';
@@ -330,13 +323,14 @@ export function useFileTree(
     }, 500);
   });
 
-  function refreshGitOnFocus() {
+  /** Refresh Git status without clearing what is shown. */
+  function refreshGit() {
     if (state.ready.value && scope.value) void loadGit();
   }
-  window.addEventListener('focus', refreshGitOnFocus);
+  window.addEventListener('focus', refreshGit);
 
   onBeforeUnmount(() => {
-    window.removeEventListener('focus', refreshGitOnFocus);
+    window.removeEventListener('focus', refreshGit);
     stopEvents();
     clearTimeout(refreshTimer);
     controller.abort();
@@ -359,6 +353,7 @@ export function useFileTree(
     version,
     toggle,
     reload,
+    refreshGit,
     openFile,
   };
 }

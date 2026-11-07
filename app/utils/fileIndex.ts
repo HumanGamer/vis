@@ -2,6 +2,7 @@ import ignore, { type Ignore } from 'ignore';
 import type { FileListOutput } from '@opencode/client';
 import type { TreeNode } from '../types/files';
 import { treeChildren } from './files';
+import { hostPathToSlashes, isWindowsPath } from './path';
 
 type RuleSet = { directory: string; rules: Ignore };
 type Directory = { nodes: TreeNode[]; rules: RuleSet[]; ignored: boolean };
@@ -20,7 +21,9 @@ export function createFileIndex(options: {
   publish: (path: string, nodes: TreeNode[]) => void;
   report: (error: unknown) => void;
 }) {
-  const root = options.directory.replace(/\/$/, '');
+  // Compare directories with forward slashes, including Windows drive paths.
+  const windows = isWindowsPath(options.directory);
+  const root = hostPathToSlashes(options.directory, windows).replace(/\/$/, '');
   const directories = new Map<string, Promise<Directory>>();
   let count = 0;
   let entries = 0;
@@ -60,7 +63,7 @@ export function createFileIndex(options: {
     return result;
   }
   async function ancestorRules() {
-    const project = (await options.projectDirectory()).replace(/\/$/, '');
+    const project = hostPathToSlashes(await options.projectDirectory(), windows).replace(/\/$/, '');
     if (!project || root === project || !root.startsWith(`${project}/`)) return [];
     let rules: RuleSet[] = [];
     let directory = project;
