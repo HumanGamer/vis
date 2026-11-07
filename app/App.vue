@@ -168,6 +168,18 @@
                         type="button"
                         class="header-toggle header-toggle-compact"
                         role="switch"
+                        :aria-checked="autoContinue"
+                        aria-label="Auto continue"
+                        title='Send "continue" whenever the agent finishes (turns off while the input is shown)'
+                        @click="autoContinue = !autoContinue"
+                      >
+                        <span>Auto continue</span>
+                        <span class="header-toggle-track" aria-hidden="true"></span>
+                      </button>
+                      <button
+                        type="button"
+                        class="header-toggle header-toggle-compact"
+                        role="switch"
                         :aria-checked="inputVisible"
                         aria-controls="app-input"
                         aria-label="Show message input"
@@ -333,6 +345,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { StorageKeys, storageGet, storageSet } from './utils/storageKeys';
+import { useAutoContinue } from './composables/useAutoContinue';
 import TopPanel, { type TopPanelWorktree } from './components/TopPanel.vue';
 import SessionPicker from './components/SessionPicker.vue';
 import SidePanel from './components/SidePanel.vue';
@@ -531,6 +544,23 @@ const inputVisible = ref(storageGet(StorageKeys.state.inputVisible) !== 'false')
 watch(inputVisible, (value) => {
   storageSet(StorageKeys.state.inputVisible, String(value));
   if (value) void nextTick(focusInput);
+});
+const { enabled: autoContinue } = useAutoContinue({
+  inputVisible,
+  onEvent: state.onEvent,
+  canContinue: (sessionID) =>
+    selected.value?.id === sessionID &&
+    !running.value &&
+    status.value === 'connected' &&
+    !busy.value &&
+    !loading.value &&
+    inbox.value.length === 0 &&
+    !state.permissions.value.some((request) => request.sessionID === sessionID) &&
+    !state.forms.value.some((form) => form.sessionID === sessionID),
+  send: (sessionID, text) =>
+    selected.value?.id === sessionID
+      ? state.send(text, composerAgent.value, composerModel.value)
+      : Promise.resolve(false),
 });
 const scrollEl = computed(() => outputPanelRef.value?.panelEl ?? undefined);
 const scroller = useAutoScroller(scrollEl, ref('follow'), {
