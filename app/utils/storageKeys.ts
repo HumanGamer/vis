@@ -8,6 +8,7 @@ export const StorageKeys = {
   },
   state: {
     sidePanelCollapsed: 'state.sidePanelCollapsed.v1',
+    inputVisible: 'state.inputVisible.v1',
     sidePanelTab: 'state.sidePanelTab.v1',
     lastAuthError: 'state.lastAuthError.v1',
   },

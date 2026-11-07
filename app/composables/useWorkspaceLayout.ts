@@ -49,13 +49,18 @@ export function useWorkspaceLayout(
       return;
     }
     const top = Math.max(0, header.getBoundingClientRect().bottom);
-    const height = Math.max(0, input.getBoundingClientRect().top - top);
+    // A hidden input panel has no box; the canvas then ends with the output area.
+    const bottom = input.getClientRects().length
+      ? input.getBoundingClientRect().top
+      : (elements.output.value?.getBoundingClientRect().bottom ?? top);
+    const height = Math.max(0, bottom - top);
     canvas.style.setProperty('--canvas-top', `${top}px`);
     canvas.style.setProperty('--canvas-height', `${height}px`);
     fw.setExtent(canvas.getBoundingClientRect().width, height);
   }
 
-  watch([elements.header, elements.input, elements.body], (values) => {
+  // The output area resizes whenever the header or input panel is shown or hidden.
+  watch([elements.header, elements.input, elements.body, elements.output], (values) => {
     observer.disconnect();
     for (const el of values) if (el) observer.observe(el);
     void nextTick(syncExtent);

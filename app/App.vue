@@ -148,18 +148,32 @@
                     @show-message-diff="unavailable('Message diff')"
                   >
                     <template #header-actions>
-                      <button
-                        type="button"
-                        class="header-toggle"
-                        role="switch"
-                        :aria-checked="headerVisible"
-                        aria-controls="app-header"
-                        aria-label="Show header menu"
-                        @click="headerVisible = !headerVisible"
-                      >
-                        <span>Menu</span>
-                        <span class="header-toggle-track" aria-hidden="true"></span>
-                      </button>
+                      <div class="header-toggles">
+                        <button
+                          type="button"
+                          class="header-toggle"
+                          role="switch"
+                          :aria-checked="headerVisible"
+                          aria-controls="app-header"
+                          aria-label="Show header menu"
+                          @click="headerVisible = !headerVisible"
+                        >
+                          <span>Menu</span>
+                          <span class="header-toggle-track" aria-hidden="true"></span>
+                        </button>
+                        <button
+                          type="button"
+                          class="header-toggle"
+                          role="switch"
+                          :aria-checked="inputVisible"
+                          aria-controls="app-input"
+                          aria-label="Show message input"
+                          @click="inputVisible = !inputVisible"
+                        >
+                          <span>Input</span>
+                          <span class="header-toggle-track" aria-hidden="true"></span>
+                        </button>
+                      </div>
                     </template>
                   </OutputPanel>
                 </div>
@@ -167,6 +181,8 @@
             </div>
           </main>
           <footer
+            v-show="inputVisible"
+            id="app-input"
             ref="inputEl"
             class="app-input"
             :class="{ 'is-disabled': !selected }"
@@ -314,6 +330,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { StorageKeys, storageGet, storageSet } from './utils/storageKeys';
 import TopPanel, { type TopPanelWorktree } from './components/TopPanel.vue';
 import SessionPicker from './components/SessionPicker.vue';
 import SidePanel from './components/SidePanel.vue';
@@ -502,6 +519,11 @@ const {
   fw,
 );
 const headerVisible = ref(!isMobile.value);
+const inputVisible = ref(storageGet(StorageKeys.state.inputVisible) !== 'false');
+watch(inputVisible, (value) => {
+  storageSet(StorageKeys.state.inputVisible, String(value));
+  if (value) void nextTick(focusInput);
+});
 const scrollEl = computed(() => outputPanelRef.value?.panelEl ?? undefined);
 const scroller = useAutoScroller(scrollEl, ref('follow'), {
   smoothEngine: 'raf',
@@ -1192,6 +1214,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
   flex: 0 0 auto;
   position: relative;
   z-index: 30;
+}
+.header-toggles {
+  display: flex;
+  align-items: center;
 }
 .header-toggle {
   display: flex;
