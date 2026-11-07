@@ -5,6 +5,8 @@ import { gitPath } from './git-path';
 export const DIFF_LINE_CHARACTERS = 1000;
 export const DIFF_HUNK_LINES = 1000;
 export const PROMPT_DIFF_CHARACTERS = 100000;
+/** Untracked files are diffed one by one, so only this many are included in patches. */
+const MAX_UNTRACKED_PATCHES = 50;
 export type GitHunk = { patch: string; omittedLines: number; omittedCharacters: number[] };
 export type GitPreview = {
   header: string;
@@ -218,6 +220,16 @@ export function createGitActions(
     section('git -c core.quotePath=true status --porcelain=v1 --no-renames --untracked-files=all') +
     section('git symbolic-ref -q HEAD || test "$?" = 1');
   const STATISTICS_SECTIONS = diffSections('--cached') + diffSections('');
+  const PATCH_OPTIONS = '--unified=3 --inter-hunk-context=0';
+  const PATCH_SECTIONS =
+    section(
+      `${DIFF} ${PATCH_OPTIONS} "$(git rev-parse --verify -q HEAD || git hash-object -t tree --stdin < /dev/null)"`,
+    ) +
+    section(
+      `git ls-files -z --others --exclude-standard | tr '\\000' '\\n' | head -n ${MAX_UNTRACKED_PATCHES} | while IFS= read -r path; do
+  if test -f "$path"; then ${DIFF} ${PATCH_OPTIONS} --no-index -- /dev/null "$path" || test "$?" = 1; fi
+done`,
+    );
 
   async function snapshot(signal?: AbortSignal): Promise<GitSnapshot> {
     return parseSnapshot(await read(SNAPSHOT_SECTIONS, 4, { signal }));
@@ -260,11 +272,32 @@ export function createGitActions(
   }
 
   /** Snapshot and diff statistics in one host command (one shell start-up). */
-  async function overview(signal?: AbortSignal) {
-    const parts = await read(SNAPSHOT_SECTIONS + STATISTICS_SECTIONS, 6, { signal });
+  /**
+   * Snapshot and diff statistics in one host command (one shell start-up).
+   * With `patch`, the same command also returns every uncommitted change
+   * against HEAD as one patch (tracked files plus the first
+   * `MAX_UNTRACKED_PATCHES` untracked ones), decoded leniently so text that
+   * is not valid UTF-8 cannot fail the whole refresh.
+   */
+  async function overview(signal?: AbortSignal, options: { patch?: boolean } = {}) {
+    const count = options.patch ? 8 : 6;
+    const encoded = await readEncoded(
+      SNAPSHOT_SECTIONS + STATISTICS_SECTIONS + (options.patch ? PATCH_SECTIONS : ''),
+      count,
+      { signal, timeout: options.patch ? 30000 : undefined },
+    );
+    const parts = encoded.slice(0, 6).map(decode);
+    const lenient = new TextDecoder('utf-8', { ignoreBOM: true });
+    const patch = options.patch
+      ? encoded
+          .slice(6)
+          .map((part) => lenient.decode(Uint8Array.from(atob(part), (char) => char.charCodeAt(0))))
+          .join('')
+      : undefined;
     return {
       snapshot: parseSnapshot(parts.slice(0, 4)),
       statistics: { staged: parsePatches(parts[4]), unstaged: parsePatches(parts[5]) },
+      patch,
     };
   }
 
@@ -475,7 +508,16 @@ test "$(git symbolic-ref -q HEAD || test "$?" = 1)" = ${shellQuote(snapshot.bran
     if (code !== 0) throw new Error('Git commit failed. Refresh before continuing.');
   }
 
-  return { snapshot, statistics, overview, source, preview, recentMessages, stage, commit };
+  return {
+    snapshot,
+    statistics,
+    overview,
+    source,
+    preview,
+    recentMessages,
+    stage,
+    commit,
+  };
 }
 
 export type GitActions = ReturnType<typeof createGitActions>;

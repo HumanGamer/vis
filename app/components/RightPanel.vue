@@ -80,7 +80,7 @@
               width="12"
               height="12"
             />
-            <span class="section-title">Recent edits</span>
+            <span class="section-title">{{ gitMode ? 'Git changes' : 'Recent edits' }}</span>
             <span v-if="current" class="section-file" :title="current.file.file">
               {{ basename(current.file.file) }}
             </span>
@@ -91,6 +91,22 @@
                 {{ currentIndex + 1 }} / {{ edits.length }}
               </span>
             </span>
+          </button>
+          <button
+            v-if="!diffCollapsed"
+            type="button"
+            class="line-number-toggle"
+            :class="{ 'is-active': gitMode }"
+            :aria-pressed="gitMode"
+            :title="
+              gitMode
+                ? 'Showing all uncommitted Git changes. Click to show recent edits'
+                : 'Showing recent edits. Click to show all uncommitted Git changes'
+            "
+            aria-label="Show Git changes"
+            @click="emit('update:gitMode', !gitMode)"
+          >
+            <Icon icon="lucide:git-compare" width="13" height="13" />
           </button>
           <button
             v-if="!diffCollapsed"
@@ -111,7 +127,15 @@
           class="diff-scroll"
           :class="{ 'no-line-numbers': !lineNumbers }"
         >
-          <p v-if="!current" class="empty">No edits yet.</p>
+          <p v-if="!current" class="empty">
+            {{
+              !gitMode
+                ? 'No edits yet.'
+                : gitLoading
+                  ? 'Loading Git changes…'
+                  : 'No uncommitted changes.'
+            }}
+          </p>
           <Transition v-else name="diff-swap" mode="out-in">
             <DiffRenderer
               :key="current.key"
@@ -145,8 +169,11 @@ const props = defineProps<{
   imagesCollapsed: boolean;
   diffCollapsed: boolean;
   images: RecentImage[];
-  /** Recently edited files, newest first. */
+  /** Recently edited files, newest first (or every Git change, by path, in Git mode). */
   edits: RecentFileEdit[];
+  /** Show all uncommitted Git changes instead of the recent edits. */
+  gitMode: boolean;
+  gitLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -154,6 +181,7 @@ const emit = defineEmits<{
   (event: 'toggle-images'): void;
   (event: 'toggle-diff'): void;
   (event: 'open-image', payload: { url: string; filename: string }): void;
+  (event: 'update:gitMode', value: boolean): void;
 }>();
 
 function basename(path: string) {
@@ -190,17 +218,34 @@ watch(lineNumbers, (value) => storageSet(StorageKeys.state.rightDiffLineNumbers,
 const currentIndex = ref(0);
 let passes = 0;
 const current = computed(() => props.edits[currentIndex.value] ?? props.edits[0]);
+// Follow the shown file by key as the list changes, and jump straight to any
+// entry that is new (a new edit, or a Git change whose diff changed).
 watch(
-  () => props.edits[0]?.key,
-  () => {
-    currentIndex.value = 0;
-    passes = 0;
+  () => props.edits.map((entry) => entry.key),
+  (keys, previous) => {
+    const before = new Set(previous ?? []);
+    let fresh = previous?.length ? -1 : 0;
+    // The newest of the entries that just appeared (order 0 = initial load, not jumped to).
+    props.edits.forEach((entry, index) => {
+      if (before.has(entry.key) || entry.order <= 0) return;
+      if (fresh < 0 || entry.order > (props.edits[fresh]?.order ?? 0)) fresh = index;
+    });
+    if (fresh >= 0) {
+      currentIndex.value = fresh;
+      passes = 0;
+      return;
+    }
+    const shown = previous?.[currentIndex.value];
+    const index = shown ? keys.indexOf(shown) : -1;
+    currentIndex.value =
+      index >= 0 ? index : Math.min(currentIndex.value, Math.max(0, keys.length - 1));
   },
 );
 watch(
-  () => props.edits.length,
-  (length) => {
-    if (currentIndex.value >= length) currentIndex.value = 0;
+  () => props.gitMode,
+  () => {
+    currentIndex.value = 0;
+    passes = 0;
   },
 );
 useAutoScroll(diffScrollEl, () => current.value?.key, {

@@ -109,10 +109,57 @@ export function toolColor(tool: string): string {
   }
 }
 
+/** Languages known by file name rather than extension. */
+const LANGUAGE_BY_FILENAME: Record<string, string> = {
+  'cmakelists.txt': 'cmake',
+  makefile: 'makefile',
+  gnumakefile: 'makefile',
+  dockerfile: 'docker',
+};
+
 export function guessLanguageFromPath(path?: string): string {
   if (!path) return 'text';
-  const ext = path.split('.').pop()?.toLowerCase();
+  const name = path.split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  const byName = LANGUAGE_BY_FILENAME[name];
+  if (byName) return byName;
+  const ext = name.includes('.') ? name.split('.').pop() : undefined;
   switch (ext) {
+    case 'cmake':
+      return 'cmake';
+    case 'mk':
+      return 'makefile';
+    case 'ini':
+    case 'cfg':
+      return 'ini';
+    case 'bat':
+    case 'cmd':
+      return 'bat';
+    case 'ps1':
+      return 'powershell';
+    case 'cs':
+      return 'csharp';
+    case 'kt':
+      return 'kotlin';
+    case 'swift':
+      return 'swift';
+    case 'lua':
+      return 'lua';
+    case 'm':
+    case 'mm':
+      return 'objective-c';
+    case 'glsl':
+    case 'vert':
+    case 'frag':
+      return 'glsl';
+    case 'hlsl':
+      return 'hlsl';
+    case 'bash':
+    case 'zsh':
+      return 'shellscript';
+    case 'hh':
+    case 'hxx':
+    case 'inl':
+      return 'cpp';
     case 'ts':
       return 'typescript';
     case 'tsx':

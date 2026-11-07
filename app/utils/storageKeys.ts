@@ -15,6 +15,7 @@ export const StorageKeys = {
     rightImagesCollapsed: 'state.rightImagesCollapsed.v1',
     rightDiffCollapsed: 'state.rightDiffCollapsed.v1',
     rightDiffLineNumbers: 'state.rightDiffLineNumbers.v1',
+    rightDiffGitMode: 'state.rightDiffGitMode.v1',
     sidePanelTab: 'state.sidePanelTab.v1',
     lastAuthError: 'state.lastAuthError.v1',
   },

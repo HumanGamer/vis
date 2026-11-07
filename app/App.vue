@@ -253,7 +253,10 @@
             :images-collapsed="rightImagesCollapsed"
             :diff-collapsed="rightDiffCollapsed"
             :images="windows.recent.images.value"
-            :edits="windows.recent.edits.value"
+            :edits="rightDiffGitMode ? gitChangeEdits : windows.recent.edits.value"
+            :git-mode="rightDiffGitMode"
+            :git-loading="gitChangeLoading"
+            @update:git-mode="rightDiffGitMode = $event"
             @toggle-collapse="rightPanelCollapsed = !rightPanelCollapsed"
             @toggle-images="rightImagesCollapsed = !rightImagesCollapsed"
             @toggle-diff="rightDiffCollapsed = !rightDiffCollapsed"
@@ -384,6 +387,7 @@ import { useSessionWindows } from './composables/useSessionWindows';
 import { useFileTree } from './composables/useFileTree';
 import { useTerminalWindows } from './composables/useTerminalWindows';
 import { useGitControls } from './composables/useGitControls';
+import { useGitChangeEdits } from './composables/useGitChangeEdits';
 import { useComposerDraft } from './composables/useComposerDraft';
 import { useMessages } from './composables/useMessages';
 import { useCredentials } from './composables/useCredentials';
@@ -573,6 +577,13 @@ watch(rightImagesCollapsed, (value) =>
 );
 watch(rightDiffCollapsed, (value) =>
   storageSet(StorageKeys.state.rightDiffCollapsed, String(value)),
+);
+const rightDiffGitMode = ref(storageGet(StorageKeys.state.rightDiffGitMode) === 'true');
+watch(rightDiffGitMode, (value) => storageSet(StorageKeys.state.rightDiffGitMode, String(value)));
+const { edits: gitChangeEdits, loading: gitChangeLoading } = useGitChangeEdits(
+  fileTree.gitSnapshot,
+  fileTree.includePatch,
+  computed(() => rightDiffGitMode.value && !rightPanelCollapsed.value && !rightDiffCollapsed.value),
 );
 watch(inputVisible, (value) => {
   storageSet(StorageKeys.state.inputVisible, String(value));

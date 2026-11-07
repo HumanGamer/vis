@@ -64,6 +64,13 @@ function parseInlineFileRef(rawRef: string, fileSet: Set<string>): ParsedInlineF
 
 let highlighterPromise: Promise<Awaited<ReturnType<typeof createHighlighter>>> | null = null;
 let cachedTheme = '';
+/**
+ * The theme's default text colour. Shiki puts it only on its own <pre>, which
+ * is discarded when splitting into rows, so plain text (e.g. CMakeLists.txt or
+ * .txt files, which have no tokens of their own) would otherwise inherit
+ * whatever colour the surrounding page uses.
+ */
+let themeForeground = '';
 let loadedLanguageCache = new Set<string>(['text']);
 let failedLanguageCache = new Set<string>();
 
@@ -83,7 +90,17 @@ function pruneHighlightCache(cache: Map<string, string>) {
 function getHighlighter(theme: string) {
   if (!highlighterPromise || cachedTheme !== theme) {
     cachedTheme = theme;
-    highlighterPromise = createHighlighter({ themes: [theme], langs: ['text'] });
+    themeForeground = '';
+    highlighterPromise = createHighlighter({ themes: [theme], langs: ['text'] }).then(
+      (highlighter) => {
+        try {
+          if (cachedTheme === theme) themeForeground = highlighter.getTheme(theme).fg ?? '';
+        } catch {
+          // Leave the colour inherited.
+        }
+        return highlighter;
+      },
+    );
     loadedLanguageCache = new Set(['text']);
     failedLanguageCache = new Set();
     codeHtmlCache = new Map();
@@ -175,7 +192,8 @@ function escapeHtml(value: string) {
 }
 
 function buildHtmlFromRows(rows: string) {
-  return `<div class="code-host"><pre class="shiki"><code>${rows}</code></pre></div>`;
+  const style = themeForeground ? ` style="color:${escapeHtml(themeForeground)}"` : '';
+  return `<div class="code-host"><pre class="shiki"${style}><code>${rows}</code></pre></div>`;
 }
 
 function buildCodeRows(

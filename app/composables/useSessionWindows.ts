@@ -145,9 +145,15 @@ export function useSessionWindows(state: ReturnType<typeof useSessionState>) {
       if (message.type !== 'assistant') continue;
       for (const [index, content] of message.content.entries()) {
         if (content.type === 'tool') {
+          // Order by when the tool finished, not when its message started: one
+          // assistant message (or a subagent's) can span many edits over time.
           recent.record(
             `${sessionID}:${message.id}:${index}`,
-            message.time.created + index / 1e3,
+            (content.time?.completed ??
+              content.time?.ran ??
+              content.time?.created ??
+              message.time.created) +
+              index / 1e6,
             content,
           );
           observeTool(sessionID, message.id, content);
