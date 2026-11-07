@@ -8,9 +8,10 @@
 //! native notifications (the notification plugin backs the web `Notification` API).
 
 use std::net::TcpListener;
+use std::sync::Mutex;
 
 use tauri::webview::NewWindowResponse;
-use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_opener::OpenerExt;
 
 /// Loopback address the bundled UI is served from. Keep this stable: it is the
@@ -18,6 +19,32 @@ use tauri_plugin_opener::OpenerExt;
 /// credentials are scoped to it.
 const UI_HOST: &str = "127.0.0.1";
 const UI_PORT: u16 = 41730;
+
+/// Window size (logical px) at which the UI shows at 100%; smaller windows zoom
+/// the whole page out so the layout keeps its proportions.
+const FULL_SIZE: (f64, f64) = (1400.0, 860.0);
+const MIN_ZOOM: f64 = 0.6;
+
+fn zoom_for(width: f64, height: f64) -> f64 {
+    (width / FULL_SIZE.0).min(height / FULL_SIZE.1).clamp(MIN_ZOOM, 1.0)
+}
+
+/// Scale the whole page (like browser zoom) to fit the window's current size.
+fn fit_zoom(window: &WebviewWindow, last: &Mutex<f64>) {
+    let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) else {
+        return;
+    };
+    let logical = size.to_logical::<f64>(scale);
+    let zoom = zoom_for(logical.width, logical.height);
+    let mut last = last.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    // Skip tiny changes so dragging the window edge does not re-lay out every pixel.
+    if (zoom - *last).abs() < 0.01 {
+        return;
+    }
+    if window.set_zoom(zoom).is_ok() {
+        *last = zoom;
+    }
+}
 
 fn ui_origin() -> String {
     format!("http://{UI_HOST}:{UI_PORT}")
@@ -108,6 +135,16 @@ pub fn run() {
                 })
                 .build()?;
             let _ = window.set_focus();
+
+            // Zoom the page with the window size (desktop builds only).
+            let last_zoom = std::sync::Arc::new(Mutex::new(1.0));
+            fit_zoom(&window, &last_zoom);
+            let zoom_window = window.clone();
+            window.on_window_event(move |event| {
+                if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+                    fit_zoom(&zoom_window, &last_zoom);
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -129,8 +129,48 @@ export function useFloatingWindows() {
   };
 
   function setExtent(w: number, h: number) {
+    const previous = extent;
     extent = { width: w, height: h };
-    for (const entry of entriesMap.values()) fitWindow(entry);
+    const resized = previous.width !== w || previous.height !== h;
+    const mobile = window.matchMedia('(max-width: 768px)').matches;
+    for (const entry of entriesMap.values()) {
+      if (resized && !mobile) followResize(entry, previous);
+      fitWindow(entry);
+    }
+  }
+
+  /**
+   * Each window's intended relative centre, plus the position last set from it.
+   * Clamping on a small area must not drift the window: growing the area again
+   * returns it to where it was. A window moved since then gets a new anchor.
+   */
+  const anchors = new Map<string, { relX: number; relY: number; x: number; y: number }>();
+
+  /**
+   * When the window area changes size, keep each window's centre at the same
+   * relative spot and keep the whole window inside the area (top-left aligned
+   * when it is larger than the area; sizes are left as chosen).
+   */
+  function followResize(entry: FloatingWindowEntry, previous: Extent) {
+    const width = entry.width ?? 600;
+    const height = entry.height ?? 400;
+    const anchor = anchors.get(entry.key);
+    const unmoved = anchor && anchor.x === entry.x && anchor.y === entry.y;
+    const relX = unmoved
+      ? anchor.relX
+      : previous.width > 0
+        ? (entry.x + width / 2) / previous.width
+        : 0.5;
+    const relY = unmoved
+      ? anchor.relY
+      : previous.height > 0
+        ? (entry.y + height / 2) / previous.height
+        : 0.5;
+    const x = relX * extent.width - width / 2;
+    const y = relY * extent.height - height / 2;
+    entry.x = Math.round(Math.max(0, Math.min(x, extent.width - width)));
+    entry.y = Math.round(Math.max(0, Math.min(y, extent.height - height)));
+    anchors.set(entry.key, { relX, relY, x: entry.x, y: entry.y });
   }
 
   function fitWindow(entry: FloatingWindowEntry) {
@@ -422,6 +462,7 @@ export function useFloatingWindows() {
   async function close(key: string): Promise<void> {
     const entry = entriesMap.get(key);
     if (!entry) return;
+    anchors.delete(key);
 
     const timerId = timerMap.get(key);
     if (timerId !== undefined) {
