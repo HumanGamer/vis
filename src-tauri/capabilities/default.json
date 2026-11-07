@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main Vis window",
+  "description": "Permissions for the main Vis window, which loads the UI from its loopback origin",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:41730", "http://localhost:5173"]
+  },
   "permissions": [
     "core:default",
     "notification:default",

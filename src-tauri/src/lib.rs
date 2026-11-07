@@ -1,21 +1,32 @@
 //! Native desktop shell for Vis.
 //!
-//! The UI is the existing Vue app, bundled into the binary and served from the
-//! `tauri://` custom protocol. Rust owns the window, opens external links in the
-//! system browser, and provides native notifications (the notification plugin
-//! backs the web `Notification` API used by the UI).
+//! The UI is the existing Vue app, bundled into the binary. In release builds it
+//! is served from a loopback-only HTTP server on a fixed port, so the page has a
+//! stable `http://` origin that the OpenCode service accepts in its CORS list
+//! (it rejects the default `tauri://localhost` custom-protocol origin). Rust also
+//! owns the window, opens external links in the system browser, and provides
+//! native notifications (the notification plugin backs the web `Notification` API).
+
+use std::net::TcpListener;
 
 use tauri::webview::NewWindowResponse;
 use tauri::{Url, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
-/// URLs that belong to the bundled UI (or the Vite dev server) stay in the webview.
-fn is_app_url(url: &Url) -> bool {
-    match url.scheme() {
-        "tauri" | "about" | "data" | "blob" => true,
-        "http" | "https" => matches!(url.host_str(), Some("tauri.localhost" | "localhost" | "127.0.0.1")),
-        _ => false,
-    }
+/// Loopback address the bundled UI is served from. Keep this stable: it is the
+/// origin users allow in `opencode service set cors`, and the webview's saved
+/// credentials are scoped to it.
+const UI_HOST: &str = "127.0.0.1";
+const UI_PORT: u16 = 41730;
+
+fn ui_origin() -> String {
+    format!("http://{UI_HOST}:{UI_PORT}")
+}
+
+/// URLs that belong to the UI stay in the webview; everything else is external.
+fn is_app_url(url: &Url, app_origin: &str) -> bool {
+    matches!(url.scheme(), "about" | "data" | "blob")
+        || url.origin().ascii_serialization() == app_origin
 }
 
 fn open_external(app: &tauri::AppHandle, url: &Url) {
@@ -24,16 +35,59 @@ fn open_external(app: &tauri::AppHandle, url: &Url) {
     }
 }
 
+fn port_unavailable_page() -> WebviewUrl {
+    let html = format!(
+        "<!doctype html><meta charset=utf-8><title>Vis</title>\
+         <body style=\"font:15px system-ui;padding:40px;background:#0f172a;color:#e2e8f0\">\
+         <h2>Vis could not start</h2>\
+         <p>Port {UI_PORT} on {UI_HOST} is already in use. Vis serves its interface from \
+         <code>{origin}</code>, the origin allowed in OpenCode's CORS settings.</p>\
+         <p>Close the other program using that port (or another running copy of Vis) and reopen Vis.</p>",
+        origin = ui_origin()
+    );
+    let encoded: String = html
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    WebviewUrl::External(format!("data:text/html,{encoded}").parse().expect("valid data URL"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // Dev builds load the Vite dev server (devUrl); release builds serve the
+    // bundled assets on the fixed loopback origin.
+    let dev = tauri::is_dev();
+    let port_free = dev || TcpListener::bind((UI_HOST, UI_PORT)).is_ok();
+
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_notification::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_notification::init());
+    if !dev && port_free {
+        builder = builder.plugin(tauri_plugin_localhost::Builder::new(UI_PORT).host(UI_HOST).build());
+    }
+
+    builder
+        .setup(move |app| {
+            let (url, app_origin) = if dev {
+                let dev_url = app.config().build.dev_url.clone().expect("devUrl is configured");
+                let origin = dev_url.origin().ascii_serialization();
+                (WebviewUrl::External(dev_url), origin)
+            } else if port_free {
+                let origin = ui_origin();
+                (WebviewUrl::External(origin.parse().expect("valid UI origin")), origin)
+            } else {
+                (port_unavailable_page(), String::new())
+            };
+
             let nav_handle = app.handle().clone();
             let popup_handle = app.handle().clone();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            let window = WebviewWindowBuilder::new(app, "main", url)
                 .title("Vis")
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(720.0, 480.0)
@@ -41,7 +95,7 @@ pub fn run() {
                 // Links to other sites go to the default browser instead of
                 // replacing the app inside the webview.
                 .on_navigation(move |url| {
-                    if is_app_url(url) {
+                    if is_app_url(url, &app_origin) {
                         return true;
                     }
                     open_external(&nav_handle, url);
@@ -53,8 +107,6 @@ pub fn run() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
-            #[cfg(debug_assertions)]
-            window.open_devtools();
             let _ = window.set_focus();
             Ok(())
         })

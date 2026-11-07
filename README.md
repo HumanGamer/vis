@@ -21,14 +21,15 @@ For self-hosting, serve `dist/` with a static HTTP server and use your vis origi
 
 Vis also ships as a native desktop app built with [Tauri 2](https://v2.tauri.app/) (Rust shell in `src-tauri/`, same Vue UI bundled into the binary). External links open in your default browser and session notifications use the OS notification center.
 
-The app's origin differs from the hosted one, so allow it in CORS:
+The app serves its interface from a loopback-only address, `http://127.0.0.1:41730`, on every platform. That is the origin to allow in CORS, on whichever machine runs the OpenCode service (it can be another machine on your network):
 
 ```bash
-opencode service set cors tauri://localhost       # macOS and Linux
-opencode service set cors http://tauri.localhost  # Windows
+opencode service set cors http://127.0.0.1:41730
 ```
 
-Then pair as above. The Connect screen shows the exact origin to allow.
+CORS takes a comma-separated list, so to keep using the hosted web UI as well, use `https://xenodrive.github.io,http://127.0.0.1:41730`. Then pair as above; the pairing URL carries the service's address. The Connect screen shows the exact origin to allow.
+
+Port 41730 must be free on the machine running the desktop app; if it isn't, the app says so on launch.
 
 ### Building
 
