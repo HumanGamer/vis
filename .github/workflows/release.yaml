@@ -1,0 +1,81 @@
+name: Release
+
+# Push a version tag (e.g. v0.0.3, matching tauri.conf.json) to build the
+# desktop app for macOS, Windows and Linux and publish a GitHub release.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: ''
+            args: ''
+          - platform: windows-latest
+            target: ''
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          key: ${{ matrix.platform }}-${{ matrix.target }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Vis ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseBody: |
+            Desktop builds of Vis.
+
+            - **macOS**: `.dmg` (`aarch64` for Apple Silicon, `x64` for Intel). The app is not notarized: if macOS says it is damaged or cannot be opened, run `xattr -cr /Applications/Vis.app` once after installing.
+            - **Windows**: `.msi` or `-setup.exe` installer.
+            - **Linux**: `.AppImage` (portable), `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/openSUSE).
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
