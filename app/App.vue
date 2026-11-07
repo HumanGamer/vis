@@ -59,10 +59,11 @@
       <div
         ref="appBodyEl"
         class="app-body"
-        :class="{ 'todo-collapsed': sidePanelCollapsed }"
-        :style="
-          sidePanelWidth !== null ? { '--todo-panel-width': `${sidePanelWidth}px` } : undefined
-        "
+        :class="{ 'todo-collapsed': sidePanelCollapsed, 'right-collapsed': rightPanelCollapsed }"
+        :style="{
+          ...(sidePanelWidth !== null ? { '--todo-panel-width': `${sidePanelWidth}px` } : {}),
+          ...(rightPanelWidth !== null ? { '--right-panel-width': `${rightPanelWidth}px` } : {}),
+        }"
       >
         <button
           v-if="isMobile && !sidePanelCollapsed"
@@ -241,6 +242,24 @@
             />
           </footer>
         </div>
+        <div v-if="!isMobile" ref="rightPanelAreaEl" class="right-panel-area">
+          <div
+            v-if="!rightPanelCollapsed"
+            class="right-resizer"
+            @pointerdown="startRightPanelResize"
+          ></div>
+          <RightPanel
+            :collapsed="rightPanelCollapsed"
+            :images-collapsed="rightImagesCollapsed"
+            :diff-collapsed="rightDiffCollapsed"
+            :images="windows.recent.images.value"
+            :edits="windows.recent.edits.value"
+            @toggle-collapse="rightPanelCollapsed = !rightPanelCollapsed"
+            @toggle-images="rightImagesCollapsed = !rightImagesCollapsed"
+            @toggle-diff="rightDiffCollapsed = !rightDiffCollapsed"
+            @open-image="windows.openImage"
+          />
+        </div>
         <div ref="toolWindowCanvasEl" class="tool-window-canvas">
           <TransitionGroup appear name="scale">
             <FloatingWindow
@@ -351,6 +370,7 @@ import SessionPicker from './components/SessionPicker.vue';
 import SidePanel from './components/SidePanel.vue';
 import OutputPanel from './components/OutputPanel.vue';
 import InputPanel from './components/InputPanel.vue';
+import RightPanel from './components/RightPanel.vue';
 import FloatingWindow from './components/FloatingWindow.vue';
 import ProjectPicker from './components/ProjectPicker.vue';
 import SettingsModal from './components/SettingsModal.vue';
@@ -508,6 +528,7 @@ const credentials = useCredentials();
 const headerEl = ref<HTMLElement>();
 const appBodyEl = ref<HTMLElement>();
 const sidePanelAreaEl = ref<HTMLElement>();
+const rightPanelAreaEl = ref<HTMLElement>();
 const outputEl = ref<HTMLElement>();
 const inputEl = ref<HTMLElement>();
 const toolWindowCanvasEl = ref<HTMLElement>();
@@ -521,12 +542,16 @@ const {
   sidePanelCollapsed,
   startInputResize,
   startSidePanelResize,
+  rightPanelWidth,
+  rightPanelCollapsed,
+  startRightPanelResize,
   syncExtent,
 } = useWorkspaceLayout(
   {
     header: headerEl,
     body: appBodyEl,
     side: sidePanelAreaEl,
+    right: rightPanelAreaEl,
     output: outputEl,
     input: inputEl,
     canvas: toolWindowCanvasEl,
@@ -541,12 +566,21 @@ watch(headerVisible, (value) => {
   if (!isMobile.value) storageSet(StorageKeys.state.headerVisible, String(value));
 });
 const inputVisible = ref(storageGet(StorageKeys.state.inputVisible) !== 'false');
+const rightImagesCollapsed = ref(storageGet(StorageKeys.state.rightImagesCollapsed) === 'true');
+const rightDiffCollapsed = ref(storageGet(StorageKeys.state.rightDiffCollapsed) === 'true');
+watch(rightImagesCollapsed, (value) =>
+  storageSet(StorageKeys.state.rightImagesCollapsed, String(value)),
+);
+watch(rightDiffCollapsed, (value) =>
+  storageSet(StorageKeys.state.rightDiffCollapsed, String(value)),
+);
 watch(inputVisible, (value) => {
   storageSet(StorageKeys.state.inputVisible, String(value));
   if (value) void nextTick(focusInput);
 });
 const { enabled: autoContinue } = useAutoContinue({
   inputVisible,
+  initial: storageGet(StorageKeys.state.autoContinue) === 'true',
   onEvent: state.onEvent,
   canContinue: (sessionID) =>
     selected.value?.id === sessionID &&
@@ -562,6 +596,7 @@ const { enabled: autoContinue } = useAutoContinue({
       ? state.send(text, composerAgent.value, composerModel.value)
       : Promise.resolve(false),
 });
+watch(autoContinue, (value) => storageSet(StorageKeys.state.autoContinue, String(value)));
 const scrollEl = computed(() => outputPanelRef.value?.panelEl ?? undefined);
 const scroller = useAutoScroller(scrollEl, ref('follow'), {
   smoothEngine: 'raf',
@@ -1377,6 +1412,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
 }
 .app-body.todo-collapsed {
   --todo-panel-width: var(--todo-panel-collapsed-width);
+}
+.app-body {
+  --right-panel-open-width: clamp(260px, 24vw, 420px);
+  --right-panel-width: var(--right-panel-open-width);
+}
+.app-body.right-collapsed {
+  --right-panel-width: var(--todo-panel-collapsed-width);
+}
+.right-panel-area {
+  position: relative;
+  flex: 0 0 var(--right-panel-width);
+  width: var(--right-panel-width);
+  min-height: 0;
+}
+.right-resizer {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -9px;
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.right-resizer::before {
+  content: '';
+  width: 3px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.6);
+}
+.right-resizer:hover::before {
+  background: rgba(226, 232, 240, 0.7);
 }
 .app-main-column {
   flex: 1 1 auto;

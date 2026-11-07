@@ -22,8 +22,10 @@ export function useAutoContinue(options: {
   /** Send the continue message; resolves to whether it was sent. */
   send: (sessionID: string, text: string) => Promise<boolean>;
   delayMs?: number;
+  /** Starting state (e.g. restored from storage); ignored while the input is shown. */
+  initial?: boolean;
 }) {
-  const enabled = ref(false);
+  const enabled = ref(!!options.initial && !options.inputVisible.value);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function cancel() {

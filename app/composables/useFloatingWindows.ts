@@ -154,8 +154,14 @@ export function useFloatingWindows() {
   // together do not pick the same free space.
   const reservations = new Map<string, Rect>();
 
+  // Areas new windows should stay off when possible (e.g. the activity panel).
+  let avoid: Rect[] = [];
+  function setAvoid(rects: Rect[]) {
+    avoid = rects;
+  }
+
   function occupiedRects(exclude: string): Rect[] {
-    const rects: Rect[] = [];
+    const rects: Rect[] = [...avoid];
     for (const entry of entriesMap.values()) {
       if (entry.key === exclude) continue;
       rects.push({
@@ -473,5 +479,6 @@ export function useFloatingWindows() {
     get,
     setExtent,
     getExtent,
+    setAvoid,
   };
 }

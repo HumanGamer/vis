@@ -15,7 +15,7 @@
     <div class="viewer-viewport" :aria-busy="busy">
       <div class="viewer-body">
         <div v-if="hunks.length" class="diff-document">
-          <CodeContent v-if="preamble" :html="preamble" variant="diff" />
+          <CodeContent v-if="preamble && !hidePreamble" :html="preamble" variant="diff" />
           <section v-for="hunk in hunks" :key="hunk.index">
             <div class="hunk-header">
               <div class="hunk-controls">
@@ -49,9 +49,11 @@ const props = defineProps<{
   diffAfter?: string;
   diffPatch?: string;
   diffTabs?: Array<{ file: string; before: string; after: string }>;
-  gutterMode?: 'none' | 'double';
+  gutterMode?: 'none' | 'single' | 'double';
   lang?: string;
   theme?: string;
+  /** Hide the patch header (Index / --- / +++ lines) above the first hunk. */
+  hidePreamble?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -109,7 +111,9 @@ const gutterWidth = computed(() => {
       Number(match[3]) + Number(match[4] ?? 1),
     );
   }
-  return `${String(maximum).length + 2}ch`;
+  const width = String(maximum).length + 2;
+  // The gutter spans two grid columns; a single number column needs half each.
+  return props.gutterMode === 'single' ? `${width / 2}ch` : `${width}ch`;
 });
 
 watch(

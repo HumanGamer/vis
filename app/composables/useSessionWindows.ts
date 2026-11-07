@@ -16,6 +16,7 @@ import ToolOutput from '../components/ToolWindow/ToolOutput.vue';
 import { toolOutput } from '../utils/protocol/tool-output';
 import ActivityHistory from '../components/ToolWindow/ActivityHistory.vue';
 import { useSessionActivity } from './useSessionActivity';
+import { useRecentArtifacts } from './useRecentArtifacts';
 import ContentViewer from '../components/viewers/ContentViewer.vue';
 import { toolColor } from '../components/ToolWindow/utils';
 import {
@@ -42,6 +43,7 @@ export function useSessionWindows(state: ReturnType<typeof useSessionState>) {
   const snapshots = new Map<string, number>();
   const liveMessages = new Set<string>();
   const activity = useSessionActivity(state, fw);
+  const recent = useRecentArtifacts();
 
   watch(suppressAutoWindows, (suppressed) => {
     if (!suppressed) return;
@@ -142,7 +144,14 @@ export function useSessionWindows(state: ReturnType<typeof useSessionState>) {
     for (const message of messages) {
       if (message.type !== 'assistant') continue;
       for (const [index, content] of message.content.entries()) {
-        if (content.type === 'tool') observeTool(sessionID, message.id, content);
+        if (content.type === 'tool') {
+          recent.record(
+            `${sessionID}:${message.id}:${index}`,
+            message.time.created + index / 1e3,
+            content,
+          );
+          observeTool(sessionID, message.id, content);
+        }
         if (
           content.type === 'text' &&
           (liveMessages.has(message.id) || message.time.completed === undefined)
@@ -179,6 +188,7 @@ export function useSessionWindows(state: ReturnType<typeof useSessionState>) {
     () => state.selected.value?.id,
     () => {
       generation++;
+      recent.reset();
       observed.clear();
       liveMessages.clear();
       children.clear();
@@ -370,5 +380,5 @@ export function useSessionWindows(state: ReturnType<typeof useSessionState>) {
   }
 
   onBeforeUnmount(stop);
-  return { fw, showHistory, openImage, belongsToSelection, activity };
+  return { fw, showHistory, openImage, belongsToSelection, activity, recent };
 }

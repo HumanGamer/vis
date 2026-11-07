@@ -498,9 +498,8 @@ function wrapDiffRows(
       const rowClass = row.rowClass ? ` code-row ${row.rowClass}` : ' code-row';
       if (mode === 'none') return `<div class="${rowClass.trim()}">${row.html}</div>`;
       if (mode === 'single') {
-        const left = oldValues[index] ?? '';
-        const right = newValues[index] ?? '';
-        const gutter = right || left;
+        // One column of new-file line numbers; removed lines have none.
+        const gutter = newValues[index] ?? '';
         return `<div class="${rowClass.trim()}"><span class="code-gutter span-2">${escapeHtml(gutter)}</span>${row.html}</div>`;
       }
       const oldValue = oldValues[index] ?? '';
