@@ -1,5 +1,6 @@
 import { reactive, computed, markRaw, onUnmounted, type Component } from 'vue';
 import { renderWorkerHtml } from '../utils/workerRenderer';
+import { findOpenSpot, type Rect } from '../utils/windowPlacement';
 
 export interface FloatingWindowEntry {
   key: string;
@@ -149,14 +150,23 @@ export function useFloatingWindows() {
     return extent;
   }
 
-  function getRandomPosition(targetWidth = 600, targetHeight = 400): { x: number; y: number } {
-    const padding = 20;
-    const maxX = Math.max(0, extent.width - targetWidth - padding);
-    const maxY = Math.max(0, extent.height - targetHeight - padding);
-    return {
-      x: padding + Math.floor(Math.random() * maxX),
-      y: padding + Math.floor(Math.random() * maxY),
-    };
+  // Spots chosen for windows still resolving their content, so windows opened
+  // together do not pick the same free space.
+  const reservations = new Map<string, Rect>();
+
+  function occupiedRects(exclude: string): Rect[] {
+    const rects: Rect[] = [];
+    for (const entry of entriesMap.values()) {
+      if (entry.key === exclude) continue;
+      rects.push({
+        x: entry.x,
+        y: entry.y,
+        width: entry.width ?? 600,
+        height: entry.height ?? 400,
+      });
+    }
+    for (const [key, rect] of reservations) if (key !== exclude) rects.push(rect);
+    return rects;
   }
 
   // Per-window expiry timers
@@ -187,43 +197,11 @@ export function useFloatingWindows() {
     timerMap.clear();
   });
 
-  async function open(key: string, opts: Partial<FloatingWindowEntry>): Promise<void> {
-    const existing = entriesMap.get(key);
-
-    // Merge with defaults and existing
-    const merged: FloatingWindowEntry = {
-      ...DEFAULT_OPTS,
-      ...existing,
-      ...opts,
-      key,
-      time: Date.now(),
-      zIndex: existing ? existing.zIndex : nextZIndex(isManualTier(key, opts.closable)),
-    } as FloatingWindowEntry;
-
-    // When updating an existing entry, merge props instead of replacing
-    if (existing && existing.props && opts.props) {
-      merged.props = { ...existing.props, ...opts.props };
-    }
-
-    if (!existing && window.matchMedia('(max-width: 768px)').matches) {
-      merged.width = Math.min(merged.width ?? 600, extent.width, (extent.height * 4) / 3);
-      merged.height = (merged.width * 3) / 4;
-    }
-
-    // Set initial position if new and no explicit x/y provided
-    if (!existing && opts.x == null && opts.y == null) {
-      const pos = getRandomPosition(merged.width ?? 600, merged.height ?? 400);
-      merged.x = pos.x;
-      merged.y = pos.y;
-    }
-
-    // Clamp position to visible bounds
-    const windowWidth = merged.width ?? 600;
-    const xBounds = getAxisBounds(extent.width, windowWidth, TITLEBAR_VISIBLE_PX);
-    const keepVisibleY = Math.max(1, Math.min(TITLEBAR_VISIBLE_PX, extent.height));
-    merged.x = Math.max(xBounds.min, Math.min(merged.x, xBounds.max));
-    merged.y = Math.max(0, Math.min(merged.y, extent.height - keepVisibleY));
-
+  async function resolveContent(
+    merged: FloatingWindowEntry,
+    opts: Partial<FloatingWindowEntry>,
+    existing: FloatingWindowEntry | undefined,
+  ) {
     // Execute beforeOpen hook
     if (merged.beforeOpen) {
       await merged.beforeOpen();
@@ -266,6 +244,52 @@ export function useFloatingWindows() {
     // expiresAt must be computed after content resolution (not in the merge block above)
     // so the TTL countdown starts from display-ready, not before async work.
     merged.expiresAt = resolveExpiresAt(opts, existing);
+  }
+
+  async function open(key: string, opts: Partial<FloatingWindowEntry>): Promise<void> {
+    const existing = entriesMap.get(key);
+
+    // Merge with defaults and existing
+    const merged: FloatingWindowEntry = {
+      ...DEFAULT_OPTS,
+      ...existing,
+      ...opts,
+      key,
+      time: Date.now(),
+      zIndex: existing ? existing.zIndex : nextZIndex(isManualTier(key, opts.closable)),
+    } as FloatingWindowEntry;
+
+    // When updating an existing entry, merge props instead of replacing
+    if (existing && existing.props && opts.props) {
+      merged.props = { ...existing.props, ...opts.props };
+    }
+
+    if (!existing && window.matchMedia('(max-width: 768px)').matches) {
+      merged.width = Math.min(merged.width ?? 600, extent.width, (extent.height * 4) / 3);
+      merged.height = (merged.width * 3) / 4;
+    }
+
+    // Place new windows in free space when no explicit x/y is provided
+    if (!existing && opts.x == null && opts.y == null) {
+      const size = { width: merged.width ?? 600, height: merged.height ?? 400 };
+      const pos = findOpenSpot(extent, size, occupiedRects(key));
+      merged.x = pos.x;
+      merged.y = pos.y;
+      reservations.set(key, { ...pos, ...size });
+    }
+
+    // Clamp position to visible bounds
+    const windowWidth = merged.width ?? 600;
+    const xBounds = getAxisBounds(extent.width, windowWidth, TITLEBAR_VISIBLE_PX);
+    const keepVisibleY = Math.max(1, Math.min(TITLEBAR_VISIBLE_PX, extent.height));
+    merged.x = Math.max(xBounds.min, Math.min(merged.x, xBounds.max));
+    merged.y = Math.max(0, Math.min(merged.y, extent.height - keepVisibleY));
+
+    try {
+      await resolveContent(merged, opts, existing);
+    } finally {
+      reservations.delete(key);
+    }
 
     const shouldFocusOnOpen = !existing && merged.focusOnOpen === true;
 
