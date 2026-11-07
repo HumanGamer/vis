@@ -127,9 +127,33 @@ const rootStyle = computed<StyleValue>(() => ({
   anchorName,
 }));
 
+// Horizontal correction (px) that keeps an open menu inside the viewport.
+const viewportShift = ref(0);
+const VIEWPORT_MARGIN = 8;
+
 const menuStyle = computed<StyleValue>(() => ({
   positionAnchor: anchorName,
+  // `transform` composes with any `translate` a caller sets in popupStyle.
+  transform: viewportShift.value ? `translateX(${viewportShift.value}px)` : undefined,
 }));
+
+/**
+ * Anchor positioning alone can leave a menu partly off-screen: WebKit (the
+ * macOS/Linux desktop webview) ignores right-edge alignment such as
+ * `right: anchor(right)`. Measure after layout and shift the menu back inside.
+ */
+function keepInViewport() {
+  const el = menu.value;
+  if (!el || !isActive.value) return;
+  const rect = el.getBoundingClientRect();
+  const left = rect.left - viewportShift.value;
+  const right = rect.right - viewportShift.value;
+  const limit = window.innerWidth - VIEWPORT_MARGIN;
+  let shift = 0;
+  if (right > limit) shift = limit - right;
+  if (left + shift < VIEWPORT_MARGIN) shift = VIEWPORT_MARGIN - left;
+  viewportShift.value = Math.round(shift);
+}
 
 const displayLabel = computed(() => {
   if (props.label) return props.label;
@@ -177,8 +201,10 @@ watch(isActive, (active) => {
     }
   }
   emit('update:open', active);
+  if (!active) viewportShift.value = 0;
   if (active) {
     nextTick(() => {
+      keepInViewport();
       if (props.autoFocus !== false) {
         const autoFocusEl = menu.value?.querySelector('[autofocus]');
         if (autoFocusEl instanceof HTMLElement) autoFocusEl.focus();
@@ -326,6 +352,7 @@ let observer: MutationObserver | null = null;
 
 function onMenuMutation() {
   if (!isActive.value) return;
+  keepInViewport();
   const items = getCandidateItems();
   if (items.length === 0) {
     clearHighlight();
@@ -363,6 +390,7 @@ watch(isActive, (active) => {
 
 onMounted(() => {
   window.addEventListener('pointerdown', handlePointerDown);
+  window.addEventListener('resize', keepInViewport);
   nextTick(() => {
     updateCandidateValues();
     // When the dropdown is created with open=true, the isActive watchers
@@ -375,6 +403,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('pointerdown', handlePointerDown);
+  window.removeEventListener('resize', keepInViewport);
   stopObserver();
   if (searchTimer) clearTimeout(searchTimer);
   if (searchController) searchController.abort();
