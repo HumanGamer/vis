@@ -404,6 +404,7 @@ import DropdownLabel from './Dropdown/Label.vue';
 import DropdownSearch from './Dropdown/Search.vue';
 import type { GitAction } from '../utils/git/actions';
 import { opencodeTheme, resolveTheme } from '../utils/theme';
+import { StorageKeys, storageGet, storageSet } from '../utils/storageKeys';
 
 type TreeViewMode = 'staged' | 'changes' | 'all';
 
@@ -444,7 +445,12 @@ const emit = defineEmits<{
   (event: 'git-action', action: GitAction): void;
 }>();
 
-const viewMode = ref<TreeViewMode>('all');
+const TREE_VIEW_MODES: TreeViewMode[] = ['all', 'changes', 'staged'];
+const savedViewMode = storageGet(StorageKeys.state.sidePanelTab) as TreeViewMode | null;
+const viewMode = ref<TreeViewMode>(
+  savedViewMode && TREE_VIEW_MODES.includes(savedViewMode) ? savedViewMode : 'all',
+);
+watch(viewMode, (mode) => storageSet(StorageKeys.state.sidePanelTab, mode));
 const branchMenuOpen = ref(false);
 const branchSearchQuery = ref('');
 const pushMenuOpen = ref(false);

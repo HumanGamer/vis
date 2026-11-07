@@ -518,7 +518,13 @@ const {
   },
   fw,
 );
-const headerVisible = ref(!isMobile.value);
+// Phone-width layouts start with the header hidden; desktop remembers the choice.
+const headerVisible = ref(
+  !isMobile.value && storageGet(StorageKeys.state.headerVisible) !== 'false',
+);
+watch(headerVisible, (value) => {
+  if (!isMobile.value) storageSet(StorageKeys.state.headerVisible, String(value));
+});
 const inputVisible = ref(storageGet(StorageKeys.state.inputVisible) !== 'false');
 watch(inputVisible, (value) => {
   storageSet(StorageKeys.state.inputVisible, String(value));
