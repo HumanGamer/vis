@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions for the main Vis window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "notification:default",
+    "window-state:default"
+  ]
+}

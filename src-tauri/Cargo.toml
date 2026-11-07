@@ -1,0 +1,22 @@
+[package]
+name = "vis"
+version = "0.0.2"
+description = "Vis - OpenCode Visualizer (native desktop app)"
+authors = ["Xenodrive, Inc."]
+license = "MIT"
+repository = "https://github.com/xenodrive/vis"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "vis_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-window-state = "2"
