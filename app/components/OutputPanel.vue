@@ -70,14 +70,20 @@
         </button>
       </div>
 
-      <StatusBar
-        :connection-status="connectionStatus"
-        :thinking-display-text="activityStatus || thinkingDisplayText"
-        :status-text="statusText"
-        :is-status-error="isStatusError"
-        :is-retry-status="!!isRetryStatus"
-        @reconnect="emit('reconnect')"
-      />
+      <div class="output-panel-footer">
+        <StatusBar
+          class="output-panel-status"
+          :connection-status="connectionStatus"
+          :thinking-display-text="activityStatus || thinkingDisplayText"
+          :status-text="statusText"
+          :is-status-error="isStatusError"
+          :is-retry-status="!!isRetryStatus"
+          @reconnect="emit('reconnect')"
+        />
+        <div v-if="$slots['footer-actions']" class="output-panel-footer-actions">
+          <slot name="footer-actions" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -463,6 +469,21 @@ defineExpose({ panelEl });
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.5);
 }
 
+.output-panel-footer {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.output-panel-status {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.output-panel-footer-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 12px 12px 0;
+}
 .output-panel-header {
   display: flex;
   align-items: center;

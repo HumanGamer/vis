@@ -161,19 +161,21 @@
                           <span>Menu</span>
                           <span class="header-toggle-track" aria-hidden="true"></span>
                         </button>
-                        <button
-                          type="button"
-                          class="header-toggle"
-                          role="switch"
-                          :aria-checked="inputVisible"
-                          aria-controls="app-input"
-                          aria-label="Show message input"
-                          @click="inputVisible = !inputVisible"
-                        >
-                          <span>Input</span>
-                          <span class="header-toggle-track" aria-hidden="true"></span>
-                        </button>
                       </div>
+                    </template>
+                    <template #footer-actions>
+                      <button
+                        type="button"
+                        class="header-toggle header-toggle-compact"
+                        role="switch"
+                        :aria-checked="inputVisible"
+                        aria-controls="app-input"
+                        aria-label="Show message input"
+                        @click="inputVisible = !inputVisible"
+                      >
+                        <span>Input</span>
+                        <span class="header-toggle-track" aria-hidden="true"></span>
+                      </button>
                     </template>
                   </OutputPanel>
                 </div>
@@ -1234,6 +1236,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keydown));
   color: #94a3b8;
   font-size: 12px;
   cursor: pointer;
+}
+.header-toggle-compact {
+  min-height: 0;
+  padding: 0 0 0 8px;
+  font-size: 11px;
 }
 .header-toggle:focus-visible {
   outline: 2px solid #60a5fa;

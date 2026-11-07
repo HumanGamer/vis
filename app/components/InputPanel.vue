@@ -298,8 +298,10 @@
           >
             <Icon icon="ph:stop-fill" :width="16" :height="16" />
           </button>
+        </div>
+        <!-- Send stays at the right; every other button sits at the left. -->
+        <div v-if="!isThinking || messageValue.trim() || attachments.length" class="input-send">
           <button
-            v-if="!isThinking || messageValue.trim() || attachments.length"
             type="button"
             class="input-button primary send-button"
             :disabled="props.disabled || !canSend"
@@ -927,9 +929,14 @@ const inputMessageStyle = computed(() => {
     max-width: 100%;
   }
   .input-panel .input-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
-    margin-left: 0;
+    order: 0;
+    grid-column: 1 / 3;
+    justify-content: flex-start;
+    margin-right: 0;
+  }
+  .input-panel .input-send {
+    grid-column: 3;
+    justify-self: end;
   }
   .input-panel .input-message {
     min-height: 0;
@@ -1430,10 +1437,21 @@ const inputMessageStyle = computed(() => {
   color: #fca5a5;
 }
 
+/* Buttons sit at the left of the toolbar, away from the output panel's
+   bottom-right Input switch, so toggling it cannot land on Stop. Send keeps
+   the right edge: it only acts when there is a message to send. */
 .input-actions {
+  order: -1;
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-right: 8px;
+  flex: 0 0 auto;
+}
+
+.input-send {
+  display: flex;
+  align-items: center;
   margin-left: auto;
   flex: 0 0 auto;
 }
